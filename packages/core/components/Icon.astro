@@ -106,19 +106,31 @@ if (!iconData) {
 
 const id = `ai:${collection.prefix}:${iconName ?? setName}`;
 
-if (props.size) {
-  props.width = props.size;
-  props.height = props.size;
-  delete props.size;
-}
 const renderData = iconToSVG(iconData);
+
+// Extract size before merging props
+const size = props.size;
+delete props.size;
+
+// Get the original viewBox from the icon data
+const viewBox = iconData.width && iconData.height ? `0 0 ${iconData.width} ${iconData.height}` : '0 0 24 24';
+
+// Merge props after removing size
 const normalizedProps = { ...renderData.attributes as Partial<IconifyIconBuildResult['attributes']>, ...props };
 const normalizedBody = renderData.body;
 
-const { viewBox } = normalizedProps;
-if (includeSymbol) {
-  delete normalizedProps.viewBox;
+// Ensure viewBox is preserved
+if (!includeSymbol) {
+  normalizedProps.viewBox = viewBox;
 }
+
+// If size is provided, set width/height
+if (size !== undefined) {
+  const sizeValue = typeof size === 'string' ? parseInt(size) : size;
+  normalizedProps.width = sizeValue;
+  normalizedProps.height = sizeValue;
+}
+
 ---
 
 <svg {...normalizedProps} data-icon={name}>
