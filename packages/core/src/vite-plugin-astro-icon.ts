@@ -23,6 +23,7 @@ export function createPlugin(
   const { root } = ctx;
   const virtualModuleId = "virtual:astro-icon";
   const resolvedVirtualModuleId = "\0" + virtualModuleId;
+  const iconDirs = Array.isArray(iconDir) ? iconDir : [iconDir];
 
   return {
     name: "astro-icon",
@@ -38,38 +39,73 @@ export function createPlugin(
           if (!collections) {
             collections = await loadIconifyCollections({ root, include });
           }
-          const local = await loadLocalCollection(iconDir, svgoOptions);
+
+          // Load and merge all local collections
+          const localCollections = await Promise.all(
+            iconDirs.map(dir => loadLocalCollection(dir, svgoOptions))
+          );
+
+          // Merge all local collections into one
+          const local = localCollections.reduce((merged, current) => ({
+            ...merged,
+            icons: { ...merged.icons, ...current.icons },
+            aliases: { ...merged.aliases, ...current.aliases },
+            prefix: "local",
+          }), { icons: {}, aliases: {}, prefix: "local" } as IconCollection);
+
           collections["local"] = local;
-          logCollections(collections, { ...ctx, iconDir });
+          logCollections(collections, { ...ctx, iconDir: iconDirs });
           await generateIconTypeDefinitions(Object.values(collections), root);
         } catch (ex) {
           // Failed to load the local collection
+          ctx.logger.error("Failed to load local icon collections:", ex);
         }
         return `export default ${JSON.stringify(collections)};\nexport const config = ${JSON.stringify({ include })}`;
       }
     },
     configureServer({ watcher, moduleGraph }) {
-      watcher.add(`${iconDir}/**/*.svg`);
+      // Watch all icon directories
+      iconDirs.forEach(dir => {
+        watcher.add(`${dir}/**/*.svg`);
+      });
+
       watcher.on("all", async (_, filepath: string) => {
         const parsedPath = parse(filepath);
-        const resolvedIconDir = resolve(root.pathname, iconDir);
-        const isSvgFileInIconDir =
-          parsedPath.dir.startsWith(resolvedIconDir) &&
-          parsedPath.ext === ".svg";
+        const isInIconDir = iconDirs.some(dir => {
+          const resolvedIconDir = resolve(root.pathname, dir);
+          return parsedPath.dir.startsWith(resolvedIconDir);
+        });
+        const isSvgFile = parsedPath.ext === ".svg";
         const isAstroConfig = parsedPath.name === "astro.config";
-        if (!isSvgFileInIconDir && !isAstroConfig) return;
+
+        if (!((isInIconDir && isSvgFile) || isAstroConfig)) return;
+
         console.log(`Local icons changed, reloading`);
         try {
           if (!collections) {
             collections = await loadIconifyCollections({ root, include });
           }
-          const local = await loadLocalCollection(iconDir, svgoOptions);
+
+          // Load and merge all local collections
+          const localCollections = await Promise.all(
+            iconDirs.map(dir => loadLocalCollection(dir, svgoOptions))
+          );
+
+          // Merge all local collections into one
+          const local = localCollections.reduce((merged, current) => ({
+            ...merged,
+            icons: { ...merged.icons, ...current.icons },
+            aliases: { ...merged.aliases, ...current.aliases },
+            prefix: "local",
+          }), { icons: {}, aliases: {}, prefix: "local" } as IconCollection);
+
           collections["local"] = local;
-          logCollections(collections, { ...ctx, iconDir });
+          logCollections(collections, { ...ctx, iconDir: iconDirs });
           await generateIconTypeDefinitions(Object.values(collections), root);
           moduleGraph.invalidateAll();
         } catch (ex) {
           // Failed to load the local collection
+          ctx.logger.error("Failed to reload local icon collections:", ex);
         }
         return `export default ${JSON.stringify(collections)};\nexport const config = ${JSON.stringify({ include })}`;
       });
@@ -79,7 +115,7 @@ export function createPlugin(
 
 function logCollections(
   collections: AstroIconCollectionMap,
-  { logger, iconDir }: PluginContext & { iconDir: string },
+  { logger, iconDir }: PluginContext & { iconDir: string | string[] },
 ) {
   if (Object.keys(collections).length === 0) {
     logger.warn("No icons detected!");
@@ -87,7 +123,8 @@ function logCollections(
   }
   const names: string[] = Object.keys(collections).filter((v) => v !== "local");
   if (collections["local"]) {
-    names.unshift(iconDir);
+    const dirs = Array.isArray(iconDir) ? iconDir : [iconDir];
+    names.unshift(...dirs);
   }
   logger.info(`Loaded icons from ${names.join(", ")}`);
 }
@@ -110,24 +147,22 @@ async function generateIconTypeDefinitions(
 // ${currentHash}
 
 declare module 'virtual:astro-icon' {
-\texport type Icon = ${
-      collections.length > 0
-        ? collections
-            .map((collection) =>
-              Object.keys(collection.icons)
-                .concat(Object.keys(collection.aliases ?? {}))
-                .map(
-                  (icon) =>
-                    `\n\t\t| "${
-                      collection.prefix === defaultPack
-                        ? ""
-                        : `${collection.prefix}:`
-                    }${icon}"`,
-                ),
-            )
-            .flat(1)
-            .join("")
-        : "never"
+\texport type Icon = ${collections.length > 0
+      ? collections
+        .map((collection) =>
+          Object.keys(collection.icons)
+            .concat(Object.keys(collection.aliases ?? {}))
+            .map(
+              (icon) =>
+                `\n\t\t| "${collection.prefix === defaultPack
+                  ? ""
+                  : `${collection.prefix}:`
+                }${icon}"`,
+            ),
+        )
+        .flat(1)
+        .join("")
+      : "never"
     };
 }`,
   );
@@ -151,11 +186,11 @@ async function tryGetHash(path: URL): Promise<string | void> {
   try {
     const text = await readFile(path, { encoding: "utf-8" });
     return text.split("\n", 3)[1].replace("// ", "");
-  } catch {}
+  } catch { }
 }
 
 async function ensureDir(path: URL): Promise<void> {
   try {
     await mkdir(path, { recursive: true });
-  } catch {}
+  } catch { }
 }

@@ -5,7 +5,7 @@ export type IntegrationOptions = {
   /**
    * @default "src/icons"
    */
-  iconDir?: string;
+  iconDir?: string | string[];
   /**
    * @default { plugins: ['preset-default'] }
    */
