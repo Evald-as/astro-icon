@@ -27,7 +27,7 @@ class AstroIconError extends Error {
 }
 
 const req = Astro.request;
-const { name = "", title, desc, "is:inline": inline = false, ...props } = Astro.props;
+const { name = "", title, desc, "is:inline": inline = true, ...props } = Astro.props;
 const map = cache.get(req) ?? new Map();
 const i = map.get(name) ?? 0;
 map.set(name, i + 1);
